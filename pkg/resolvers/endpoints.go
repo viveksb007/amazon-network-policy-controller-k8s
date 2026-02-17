@@ -405,6 +405,11 @@ func (r *defaultEndpointsResolver) createPodLabelSelector(ls *metav1.LabelSelect
 func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Context, ls *metav1.LabelSelector, namespace string,
 	ports []networking.NetworkPolicyPort) []policyinfo.EndpointInfo {
 	var networkPeers []policyinfo.EndpointInfo
+	var headlessServiceList []string
+	var nonMatchingPodSelectorList []string
+	var headlessServiceCount int
+	var nonMatchingPodSelectorCount int
+	const maxSampleSize = 50
 	if ls == nil {
 		ls = &metav1.LabelSelector{}
 	}
@@ -423,12 +428,20 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 	for _, svc := range svcList.Items {
 		// do not add headless services to policy endpoints
 		if k8s.IsServiceHeadless(&svc) {
-			r.logger.Info("skipping headless service when populating EndpointInfo", "serviceName", svc.Name, "serviceNamespace", svc.Namespace)
+			if headlessServiceCount < maxSampleSize {
+				headlessServiceList = append(headlessServiceList, fmt.Sprintf("%s/%s", svc.Namespace, svc.Name))
+			}
+			headlessServiceCount++
+			r.logger.V(1).Info("skipping headless service when populating EndpointInfo", "serviceName", svc.Name, "serviceNamespace", svc.Namespace)
 			continue
 		}
 		// do not add services if their pod selector is not matching with the pod selector defined in the network policy
 		if !svcSelector.Matches(labels.Set(svc.Spec.Selector)) {
-			r.logger.Info("skipping pod selector mismatched service when populating EndpointInfo", "serviceName", svc.Name, "serviceNamespace", svc.Namespace, "expectedPS", svcSelector)
+			if nonMatchingPodSelectorCount < maxSampleSize {
+				nonMatchingPodSelectorList = append(nonMatchingPodSelectorList, fmt.Sprintf("%s/%s (expectedPS: %s)", svc.Namespace, svc.Name, svcSelector.String()))
+			}
+			nonMatchingPodSelectorCount++
+			r.logger.V(1).Info("skipping pod selector mismatched service when populating EndpointInfo", "serviceName", svc.Name, "serviceNamespace", svc.Namespace, "expectedPS", svcSelector)
 			continue
 		}
 
@@ -465,6 +478,14 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 			CIDR:  policyinfo.NetworkAddress(svc.Spec.ClusterIP),
 			Ports: portList,
 		})
+	}
+	if headlessServiceCount > 0 {
+		r.logger.Info("Skipped headless services", "count", headlessServiceCount)
+		r.logger.Info("Sample of headless services (up to 50)", "services", headlessServiceList)
+	}
+	if nonMatchingPodSelectorCount > 0 {
+		r.logger.Info("Skipped pod selector mismatched services", "count", nonMatchingPodSelectorCount)
+		r.logger.Info("Sample of pod selector mismatched services (up to 50)", "services", nonMatchingPodSelectorList)
 	}
 	return networkPeers
 }
