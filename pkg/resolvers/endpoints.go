@@ -432,6 +432,14 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 			continue
 		}
 
+		// Check for issue: named service targetPort + pod container ports not allowed by policy
+		if r.hasNamedPortBypassIssue(ctx, &svc, ports) {
+			r.logger.Info("skipping service due to named port bypass issue",
+				"serviceName", svc.Name, "serviceNamespace", svc.Namespace,
+				"reason", "service uses named targetPort with pods resolving to container ports not allowed by policy")
+			continue
+		}
+
 		var portList []policyinfo.Port
 		for _, port := range ports {
 			var portPtr *int32
@@ -461,6 +469,87 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 	return networkPeers
 }
 
+// getPodsForService returns the list of pods matching the service's selector
+func (r *defaultEndpointsResolver) getPodsForService(ctx context.Context, svc *corev1.Service) ([]corev1.Pod, error) {
+	podSelector, err := metav1.LabelSelectorAsSelector(metav1.SetAsLabelSelector(svc.Spec.Selector))
+	if err != nil {
+		return nil, err
+	}
+	podList := &corev1.PodList{}
+	if err := r.k8sClient.List(ctx, podList, &client.ListOptions{
+		LabelSelector: podSelector,
+		Namespace:     svc.Namespace,
+	}); err != nil {
+		return nil, err
+	}
+	return podList.Items, nil
+}
+
+// hasNamedPortBypassIssue checks if adding a Service ClusterIP would create a bypass.
+// The issue occurs when:
+// 1. The Service uses a NAMED targetPort (e.g., targetPort: http)
+// 2. Any pod behind the Service resolves that named port to a container port not allowed by NetworkPolicy ports
+func (r *defaultEndpointsResolver) hasNamedPortBypassIssue(ctx context.Context, svc *corev1.Service,
+	policyPorts []networking.NetworkPolicyPort) bool {
+	// Collect numeric port+protocol pairs allowed by the policy
+	type portProto struct {
+		port     int32
+		protocol corev1.Protocol
+	}
+	allowedPorts := make(map[portProto]bool)
+	for _, port := range policyPorts {
+		if port.Port != nil && port.Port.Type == intstr.Int && port.Protocol != nil {
+			allowedPorts[portProto{port: port.Port.IntVal, protocol: *port.Protocol}] = true
+		}
+	}
+	// No numeric policy ports means named ports in policy (intentional per-pod resolution) or all ports allowed
+	if len(allowedPorts) == 0 {
+		return false
+	}
+
+	// Check if service has any named targetPort and collect them
+	namedTargetPorts := make(map[string]bool)
+	for _, svcPort := range svc.Spec.Ports {
+		if svcPort.TargetPort.Type == intstr.String {
+			namedTargetPorts[svcPort.TargetPort.StrVal] = true
+		}
+	}
+	if len(namedTargetPorts) == 0 {
+		return false
+	}
+
+	// Fetch pods only when we actually need to check container ports
+	svcPods, err := r.getPodsForService(ctx, svc)
+	if err != nil {
+		r.logger.Error(err, "Unable to list pods for bypass check", "service", k8s.NamespacedName(svc))
+		return false
+	}
+
+	// Single pass over all pods: check if any named targetPort resolves to a container port not allowed by policy
+	for _, pod := range svcPods {
+		for _, container := range pod.Spec.Containers {
+			for _, cp := range container.Ports {
+				if namedTargetPorts[cp.Name] {
+					proto := cp.Protocol
+					if proto == "" {
+						proto = corev1.ProtocolTCP
+					}
+					if !allowedPorts[portProto{port: cp.ContainerPort, protocol: proto}] {
+						r.logger.V(1).Info("Named port resolves to disallowed container port",
+							"service", k8s.NamespacedName(svc), "portName", cp.Name,
+							"containerPort", cp.ContainerPort, "protocol", proto)
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// getMatchingServicePort finds the service listen port that matches the given port specification.
+// It first tries direct lookup, then falls back to checking pod specs.
 func (r *defaultEndpointsResolver) getMatchingServicePort(ctx context.Context, svc *corev1.Service, port *intstr.IntOrString, protocol corev1.Protocol) (int32, error) {
 	if port == nil {
 		return 0, errors.New("unable to lookup service listen port, input port is nil")
@@ -470,24 +559,18 @@ func (r *defaultEndpointsResolver) getMatchingServicePort(ctx context.Context, s
 	} else {
 		r.logger.Info("Unable to lookup service port", "err", err)
 	}
-	// List pods matching the svc selector
-	podSelector, err := metav1.LabelSelectorAsSelector(metav1.SetAsLabelSelector(svc.Spec.Selector))
+
+	podList, err := r.getPodsForService(ctx, svc)
 	if err != nil {
-		return 0, err
-	}
-	podList := &corev1.PodList{}
-	if err := r.k8sClient.List(ctx, podList, &client.ListOptions{
-		LabelSelector: podSelector,
-		Namespace:     svc.Namespace,
-	}); err != nil {
 		r.logger.Info("Unable to List Pods", "err", err)
 		return 0, err
 	}
-	for i := range podList.Items {
-		if portVal, err := k8s.LookupListenPortFromPodSpec(svc, &podList.Items[i], *port, protocol); err == nil {
+
+	for _, pod := range podList {
+		if portVal, err := k8s.LookupListenPortFromPodSpec(svc, &pod, *port, protocol); err == nil {
 			return portVal, nil
 		} else {
-			r.logger.V(1).Info("The pod doesn't have port matched", "err", err, "pod", podList.Items[i])
+			r.logger.V(1).Info("The pod doesn't have port matched", "err", err, "pod", pod)
 		}
 	}
 	return 0, errors.Errorf("unable to find matching service listen port %s for service %s", port.String(), k8s.NamespacedName(svc))
