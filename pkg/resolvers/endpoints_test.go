@@ -1915,6 +1915,7 @@ func TestEndpointsResolver_NamedPortBypassIssue(t *testing.T) {
 
 func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 	protocolTCP := corev1.ProtocolTCP
+	protocolUDP := corev1.ProtocolUDP
 	port80 := int32(80)
 	intOrStrPort80 := intstr.FromInt(int(port80))
 	intOrStrPort8080 := intstr.FromInt(8080)
@@ -2030,7 +2031,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "safe: consistent named port resolution",
+			name: "problematic: consistent named port resolution to disallowed port",
 			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
 				Spec: corev1.ServiceSpec{
@@ -2064,7 +2065,44 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					Status: corev1.PodStatus{PodIP: "1.0.0.2", Phase: corev1.PodRunning},
 				},
 			},
-			expected: false, // Consistent resolution is safe
+			expected: true, // Container port 8080 is not allowed by policy (only 80)
+		},
+		{
+			name: "safe: consistent named port resolution to allowed port",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
+				Spec: corev1.ServiceSpec{
+					ClusterIP: "10.0.0.1",
+					Selector:  map[string]string{"app": "test"},
+					Ports: []corev1.ServicePort{
+						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+					},
+				},
+			},
+			policyPorts: []networking.NetworkPolicyPort{
+				{Protocol: &protocolTCP, Port: &intOrStrPort80},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns", Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 80}}},
+						},
+					},
+					Status: corev1.PodStatus{PodIP: "1.0.0.1", Phase: corev1.PodRunning},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod2", Namespace: "ns", Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 80}}},
+						},
+					},
+					Status: corev1.PodStatus{PodIP: "1.0.0.2", Phase: corev1.PodRunning},
+				},
+			},
+			expected: false, // All pods resolve to allowed port 80
 		},
 		{
 			name: "safe: no policy ports specified",
@@ -2130,6 +2168,62 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 			},
 			expected: false, // All container ports are allowed by policy
 		},
+		{
+			name: "problematic: protocol mismatch - policy allows TCP but container port is UDP",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
+				Spec: corev1.ServiceSpec{
+					ClusterIP: "10.0.0.1",
+					Selector:  map[string]string{"app": "test"},
+					Ports: []corev1.ServicePort{
+						{TargetPort: intstr.FromString("dns"), Protocol: corev1.ProtocolUDP},
+					},
+				},
+			},
+			policyPorts: []networking.NetworkPolicyPort{
+				{Protocol: &protocolTCP, Port: &intOrStrPort80},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns", Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Ports: []corev1.ContainerPort{{Name: "dns", ContainerPort: 80, Protocol: corev1.ProtocolUDP}}},
+						},
+					},
+					Status: corev1.PodStatus{PodIP: "1.0.0.1", Phase: corev1.PodRunning},
+				},
+			},
+			expected: true, // Policy allows TCP/80 but container port is UDP/80
+		},
+		{
+			name: "safe: protocol matches - policy allows UDP and container port is UDP",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
+				Spec: corev1.ServiceSpec{
+					ClusterIP: "10.0.0.1",
+					Selector:  map[string]string{"app": "test"},
+					Ports: []corev1.ServicePort{
+						{TargetPort: intstr.FromString("dns"), Protocol: corev1.ProtocolUDP},
+					},
+				},
+			},
+			policyPorts: []networking.NetworkPolicyPort{
+				{Protocol: &protocolUDP, Port: &intOrStrPort80},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns", Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Ports: []corev1.ContainerPort{{Name: "dns", ContainerPort: 80, Protocol: corev1.ProtocolUDP}}},
+						},
+					},
+					Status: corev1.PodStatus{PodIP: "1.0.0.1", Phase: corev1.PodRunning},
+				},
+			},
+			expected: false, // Policy allows UDP/80 and container port is UDP/80
+		},
 	}
 
 	for _, tt := range tests {
@@ -2140,8 +2234,33 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 			mockClient := mock_client.NewMockClient(ctrl)
 			resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
 
-			// Pass pods directly to the function (no longer needs context or client)
-			result := resolver.hasNamedPortBypassIssue(tt.service, tt.policyPorts, tt.pods)
+			// Mock the pod List call for cases that get past early returns
+			needsPodList := false
+			hasNumericPolicyPort := false
+			for _, p := range tt.policyPorts {
+				if p.Port != nil && p.Port.Type == intstr.Int {
+					hasNumericPolicyPort = true
+					break
+				}
+			}
+			if hasNumericPolicyPort {
+				for _, sp := range tt.service.Spec.Ports {
+					if sp.TargetPort.Type == intstr.String {
+						needsPodList = true
+						break
+					}
+				}
+			}
+			if needsPodList {
+				mockClient.EXPECT().List(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+					func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+						list.(*corev1.PodList).Items = tt.pods
+						return nil
+					},
+				)
+			}
+
+			result := resolver.hasNamedPortBypassIssue(context.Background(), tt.service, tt.policyPorts)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
