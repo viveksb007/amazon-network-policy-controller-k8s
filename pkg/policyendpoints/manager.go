@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"time"
 
 	"golang.org/x/exp/maps"
 
@@ -23,6 +24,30 @@ import (
 	"github.com/aws/amazon-network-policy-controller-k8s/pkg/k8s"
 	"github.com/aws/amazon-network-policy-controller-k8s/pkg/resolvers"
 )
+
+const (
+	// LastChangeTriggerTimeAnnotation is set on PolicyEndpoint/ClusterPolicyEndpoint
+	// to track when NPC last created or updated the resource. NPA reads this to
+	// compute E2E policy programming latency (same pattern as kube-proxy's
+	// endpoints.kubernetes.io/last-change-trigger-time on EndpointSlice).
+	LastChangeTriggerTimeAnnotation = "networking.k8s.aws/last-change-trigger-time"
+)
+
+// setLastChangeTriggerTime sets the E2E latency annotation on a PolicyEndpoint.
+func setLastChangeTriggerTime(pe *policyinfo.PolicyEndpoint) {
+	if pe.Annotations == nil {
+		pe.Annotations = make(map[string]string)
+	}
+	pe.Annotations[LastChangeTriggerTimeAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+// setLastChangeTriggerTimeOnCPE sets the E2E latency annotation on a ClusterPolicyEndpoint.
+func setLastChangeTriggerTimeOnCPE(cpe *policyinfo.ClusterPolicyEndpoint) {
+	if cpe.Annotations == nil {
+		cpe.Annotations = make(map[string]string)
+	}
+	cpe.Annotations[LastChangeTriggerTimeAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
+}
 
 // PolicyMetadata contains the minimal metadata needed for creating PolicyEndpoints
 type PolicyMetadata struct {
@@ -92,26 +117,28 @@ func (m *policyEndpointsManager) Reconcile(ctx context.Context, policy *networki
 		return err
 	}
 	m.logger.Info("Got policy endpoints lists", "create", len(createList), "update", len(updateList), "delete", len(deleteList))
-	for _, policyEndpoint := range createList {
-		if err := m.k8sClient.Create(ctx, &policyEndpoint); err != nil {
+	for i := range createList {
+		setLastChangeTriggerTime(&createList[i])
+		if err := m.k8sClient.Create(ctx, &createList[i]); err != nil {
 			return err
 		}
-		m.logger.Info("Created policy endpoint", "id", k8s.NamespacedName(&policyEndpoint))
+		m.logger.Info("Created policy endpoint", "id", k8s.NamespacedName(&createList[i]))
 	}
 
-	for _, policyEndpoint := range updateList {
+	for i := range updateList {
 		oldRes := &policyinfo.PolicyEndpoint{}
-		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&policyEndpoint), oldRes); err != nil {
+		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&updateList[i]), oldRes); err != nil {
 			return err
 		}
-		if equality.Semantic.DeepEqual(oldRes.Spec, policyEndpoint.Spec) {
-			m.logger.V(1).Info("Policy endpoint already up to date", "id", k8s.NamespacedName(&policyEndpoint))
+		if equality.Semantic.DeepEqual(oldRes.Spec, updateList[i].Spec) {
+			m.logger.V(1).Info("Policy endpoint already up to date", "id", k8s.NamespacedName(&updateList[i]))
 			continue
 		}
-		if err := m.k8sClient.Patch(ctx, &policyEndpoint, client.MergeFrom(oldRes)); err != nil {
+		setLastChangeTriggerTime(&updateList[i])
+		if err := m.k8sClient.Patch(ctx, &updateList[i], client.MergeFrom(oldRes)); err != nil {
 			return err
 		}
-		m.logger.Info("Updated policy endpoint", "id", k8s.NamespacedName(&policyEndpoint))
+		m.logger.Info("Updated policy endpoint", "id", k8s.NamespacedName(&updateList[i]))
 	}
 
 	for _, policyEndpoint := range deleteList {
@@ -163,26 +190,28 @@ func (m *policyEndpointsManager) ReconcileANP(ctx context.Context, anp *policyin
 	}
 	m.logger.Info("Got ANP policy endpoints lists", "create", len(createList), "update", len(updateList), "delete", len(deleteList))
 
-	for _, policyEndpoint := range createList {
-		if err := m.k8sClient.Create(ctx, &policyEndpoint); err != nil {
+	for i := range createList {
+		setLastChangeTriggerTime(&createList[i])
+		if err := m.k8sClient.Create(ctx, &createList[i]); err != nil {
 			return err
 		}
-		m.logger.Info("Created ANP policy endpoint", "id", k8s.NamespacedName(&policyEndpoint))
+		m.logger.Info("Created ANP policy endpoint", "id", k8s.NamespacedName(&createList[i]))
 	}
 
-	for _, policyEndpoint := range updateList {
+	for i := range updateList {
 		oldRes := &policyinfo.PolicyEndpoint{}
-		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&policyEndpoint), oldRes); err != nil {
+		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&updateList[i]), oldRes); err != nil {
 			return err
 		}
-		if equality.Semantic.DeepEqual(oldRes.Spec, policyEndpoint.Spec) {
-			m.logger.V(1).Info("ANP policy endpoint already up to date", "id", k8s.NamespacedName(&policyEndpoint))
+		if equality.Semantic.DeepEqual(oldRes.Spec, updateList[i].Spec) {
+			m.logger.V(1).Info("ANP policy endpoint already up to date", "id", k8s.NamespacedName(&updateList[i]))
 			continue
 		}
-		if err := m.k8sClient.Patch(ctx, &policyEndpoint, client.MergeFrom(oldRes)); err != nil {
+		setLastChangeTriggerTime(&updateList[i])
+		if err := m.k8sClient.Patch(ctx, &updateList[i], client.MergeFrom(oldRes)); err != nil {
 			return err
 		}
-		m.logger.Info("Updated ANP policy endpoint", "id", k8s.NamespacedName(&policyEndpoint))
+		m.logger.Info("Updated ANP policy endpoint", "id", k8s.NamespacedName(&updateList[i]))
 	}
 
 	for _, policyEndpoint := range deleteList {
@@ -699,18 +728,20 @@ func (m *policyEndpointsManager) ReconcileCNP(ctx context.Context, cnp *policyin
 	m.logger.Info("Got cluster policy endpoints lists", "create", len(createList), "update", len(updateList), "delete", len(deleteList))
 
 	// Create, update, delete ClusterPolicyEndpoints
-	for _, cpe := range createList {
-		if err := m.k8sClient.Create(ctx, &cpe); err != nil {
+	for i := range createList {
+		setLastChangeTriggerTimeOnCPE(&createList[i])
+		if err := m.k8sClient.Create(ctx, &createList[i]); err != nil {
 			return err
 		}
-		m.logger.Info("Created cluster policy endpoint", "name", cpe.Name)
+		m.logger.Info("Created cluster policy endpoint", "name", createList[i].Name)
 	}
 
-	for _, cpe := range updateList {
-		if err := m.k8sClient.Update(ctx, &cpe); err != nil {
+	for i := range updateList {
+		setLastChangeTriggerTimeOnCPE(&updateList[i])
+		if err := m.k8sClient.Update(ctx, &updateList[i]); err != nil {
 			return err
 		}
-		m.logger.Info("Updated cluster policy endpoint", "name", cpe.Name)
+		m.logger.Info("Updated cluster policy endpoint", "name", updateList[i].Name)
 	}
 
 	for _, cpe := range deleteList {
