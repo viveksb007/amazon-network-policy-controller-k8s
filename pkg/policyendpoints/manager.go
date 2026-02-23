@@ -737,6 +737,14 @@ func (m *policyEndpointsManager) ReconcileCNP(ctx context.Context, cnp *policyin
 	}
 
 	for i := range updateList {
+		oldRes := &policyinfo.ClusterPolicyEndpoint{}
+		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&updateList[i]), oldRes); err != nil {
+			return err
+		}
+		if equality.Semantic.DeepEqual(oldRes.Spec, updateList[i].Spec) {
+			m.logger.V(1).Info("Cluster policy endpoint already up to date", "id", k8s.NamespacedName(&updateList[i]))
+			continue
+		}
 		setLastChangeTriggerTimeOnCPE(&updateList[i])
 		if err := m.k8sClient.Update(ctx, &updateList[i]); err != nil {
 			return err

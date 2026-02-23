@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/golang/mock/gomock"
@@ -1105,6 +1106,49 @@ type mockCNPEndpointsResolver struct {
 func (m *mockCNPEndpointsResolver) ResolveClusterNetworkPolicy(ctx context.Context, cnp *policyinfo.ClusterNetworkPolicy) ([]policyinfo.ClusterEndpointInfo, []policyinfo.ClusterEndpointInfo, []policyinfo.PodEndpoint, error) {
 	m.called = true
 	return m.ingressRules, m.egressRules, m.podEndpoints, nil
+}
+
+func Test_setLastChangeTriggerTime(t *testing.T) {
+	t.Run("sets annotation on PE with nil annotations", func(t *testing.T) {
+		pe := &policyinfo.PolicyEndpoint{}
+		before := time.Now().UTC()
+		setLastChangeTriggerTime(pe)
+		after := time.Now().UTC()
+
+		val, ok := pe.Annotations[LastChangeTriggerTimeAnnotation]
+		assert.True(t, ok)
+		ts, err := time.Parse(time.RFC3339Nano, val)
+		assert.NoError(t, err)
+		assert.False(t, ts.Before(before))
+		assert.False(t, ts.After(after))
+	})
+
+	t.Run("preserves existing annotations on PE", func(t *testing.T) {
+		pe := &policyinfo.PolicyEndpoint{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{"existing-key": "existing-value"},
+			},
+		}
+		setLastChangeTriggerTime(pe)
+
+		assert.Equal(t, "existing-value", pe.Annotations["existing-key"])
+		_, ok := pe.Annotations[LastChangeTriggerTimeAnnotation]
+		assert.True(t, ok)
+	})
+
+	t.Run("sets annotation on CPE with nil annotations", func(t *testing.T) {
+		cpe := &policyinfo.ClusterPolicyEndpoint{}
+		before := time.Now().UTC()
+		setLastChangeTriggerTimeOnCPE(cpe)
+		after := time.Now().UTC()
+
+		val, ok := cpe.Annotations[LastChangeTriggerTimeAnnotation]
+		assert.True(t, ok)
+		ts, err := time.Parse(time.RFC3339Nano, val)
+		assert.NoError(t, err)
+		assert.False(t, ts.Before(before))
+		assert.False(t, ts.After(after))
+	})
 }
 
 func Test_combineClusterRulesEndpoints(t *testing.T) {
