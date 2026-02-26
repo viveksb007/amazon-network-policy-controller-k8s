@@ -128,7 +128,7 @@ func (r *defaultPolicyReferenceResolver) isPodLabelMatchPeer(ctx context.Context
 			return true
 		}
 	} else if pod.Namespace != policyNamespace {
-		r.logger.Info("Pod and policy namespace mismatch", "pod", k8s.NamespacedName(pod),
+		r.logger.V(1).Info("Pod and policy namespace mismatch", "pod", k8s.NamespacedName(pod),
 			"policy ns", policyNamespace)
 		return false
 	}
