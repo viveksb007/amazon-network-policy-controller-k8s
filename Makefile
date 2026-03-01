@@ -180,7 +180,7 @@ $(MOCKGEN): $(LOCALBIN)
 GO_IMAGE_TAG=$(shell cat .go-version)
 BUILD_IMAGE ?= public.ecr.aws/docker/library/golang:$(GO_IMAGE_TAG)
 BASE_IMAGE ?= public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-nonroot:latest.2
-GO_RUNNER_IMAGE ?= public.ecr.aws/eks-distro/kubernetes/go-runner:v0.18.0-eks-1-32-latest
+GO_RUNNER_IMAGE ?= public.ecr.aws/eks-distro-build-tooling/go-runner:v0.18.0-go-1.25-latest.al2
 .PHONY: docker-buildx
 docker-buildx: prepare-embed test
 	for platform in $(ARCHS); do \
