@@ -315,12 +315,12 @@ func (m *policyEndpointsManager) processPolicyEndpoints(pes []policyinfo.PolicyE
 }
 
 // getCombineKey creates a combining key from CIDR and sorted exceptions
-func getCombineKey(info policyinfo.EndpointInfo) string {
-	key := string(info.CIDR) + "|"
+func getCombineKey(iep policyinfo.EndpointInfo) string {
+	key := string(iep.CIDR) + "|"
 
 	// Sort exceptions for order-independence
-	sortedExcepts := make([]policyinfo.NetworkAddress, len(info.Except))
-	copy(sortedExcepts, info.Except)
+	sortedExcepts := make([]policyinfo.NetworkAddress, len(iep.Except))
+	copy(sortedExcepts, iep.Except)
 	sort.Slice(sortedExcepts, func(i, j int) bool {
 		return string(sortedExcepts[i]) < string(sortedExcepts[j])
 	})
@@ -332,15 +332,13 @@ func getCombineKey(info policyinfo.EndpointInfo) string {
 	return key
 }
 
-// TODO: Unify combineRulesEndpoints and combineANPRulesEndpoints - both can use getCombineKey() for consistent hashing
-// the controller should consolidate the ingress and egress endpoints and put entries to one CIDR if they belong to a same CIDR and same exception list
 func combineRulesEndpoints(ingressEndpoints []policyinfo.EndpointInfo) []policyinfo.EndpointInfo {
 	combinedMap := make(map[string]policyinfo.EndpointInfo)
 	for _, iep := range ingressEndpoints {
 		key := getCombineKey(iep)
 
 		if existing, ok := combinedMap[key]; ok {
-			// If either has empty ports (all ports), result is all ports
+			// If either has all ports, result is all ports
 			if len(iep.Ports) == 0 || len(existing.Ports) == 0 {
 				existing.Ports = []policyinfo.Port{}
 			} else {
