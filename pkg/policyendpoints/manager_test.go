@@ -1151,6 +1151,134 @@ func Test_setLastChangeTriggerTime(t *testing.T) {
 	})
 }
 
+func TestCombineRulesEndpoints_DifferentExceptions(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port80 := int32(80)
+	port53 := int32(53)
+
+	endpoints := []policyinfo.EndpointInfo{
+		{
+			CIDR:   "0.0.0.0/0",
+			Except: []policyinfo.NetworkAddress{"10.0.0.0/8", "172.16.0.0/12"},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port80}},
+		},
+		{
+			CIDR:   "0.0.0.0/0",
+			Except: []policyinfo.NetworkAddress{}, // No exceptions
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port53}},
+		},
+	}
+
+	result := combineRulesEndpoints(endpoints)
+
+	// Should keep as 2 separate entries (different exceptions)
+	assert.Equal(t, 2, len(result), "Rules with different exceptions should stay separate")
+}
+
+func TestCombineRulesEndpoints_AllPortsWins(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port53 := int32(53)
+
+	endpoints := []policyinfo.EndpointInfo{
+		{
+			CIDR:   "172.16.0.0/12",
+			Except: []policyinfo.NetworkAddress{},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port53}},
+		},
+		{
+			CIDR:   "172.16.0.0/12",
+			Except: []policyinfo.NetworkAddress{},
+			Ports:  []policyinfo.Port{}, // Empty = all ports
+		},
+	}
+
+	result := combineRulesEndpoints(endpoints)
+
+	// Should combine to 1 entry with empty ports (all ports wins)
+	assert.Equal(t, 1, len(result), "Rules with same CIDR+exceptions should combine")
+	assert.Equal(t, 0, len(result[0].Ports), "All ports should take precedence")
+}
+
+func TestCombineRulesEndpoints_ExceptionOrdering(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port80 := int32(80)
+	port443 := int32(443)
+
+	endpoints := []policyinfo.EndpointInfo{
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{"192.168.0.0/16", "172.16.0.0/12"}, // Order 1
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port80}},
+		},
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{"172.16.0.0/12", "192.168.0.0/16"}, // Order 2 (reversed)
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port443}},
+		},
+	}
+
+	result := combineRulesEndpoints(endpoints)
+
+	// Should combine to 1 entry (same exceptions, just different order)
+	assert.Equal(t, 1, len(result), "Rules with same exceptions in different order should combine")
+	assert.Equal(t, 2, len(result[0].Ports), "Ports from both rules should be merged")
+}
+
+func TestCombineRulesEndpoints_PortConsolidation(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port80 := int32(80)
+	port443 := int32(443)
+	port8080 := int32(8080)
+
+	endpoints := []policyinfo.EndpointInfo{
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port80}},
+		},
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port443}},
+		},
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port8080}},
+		},
+	}
+
+	result := combineRulesEndpoints(endpoints)
+
+	// Should combine to 1 entry with all ports
+	assert.Equal(t, 1, len(result), "Rules with same CIDR+exceptions should consolidate")
+	assert.Equal(t, 3, len(result[0].Ports), "All ports should be consolidated")
+}
+
+func TestCombineRulesEndpoints_DuplicateRules(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port80 := int32(80)
+
+	endpoints := []policyinfo.EndpointInfo{
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{"192.168.0.0/16"},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port80}},
+		},
+		{
+			CIDR:   "10.0.0.0/8",
+			Except: []policyinfo.NetworkAddress{"192.168.0.0/16"},
+			Ports:  []policyinfo.Port{{Protocol: &protocolTCP, Port: &port80}},
+		},
+	}
+
+	result := combineRulesEndpoints(endpoints)
+
+	// Should combine to 1 entry (true duplicates)
+	assert.Equal(t, 1, len(result), "Duplicate rules should be deduplicated")
+	assert.Equal(t, 1, len(result[0].Ports), "Duplicate ports should be deduplicated")
+}
+
 func Test_combineClusterRulesEndpoints(t *testing.T) {
 	protocol := corev1.ProtocolTCP
 	port53 := int32(53)
