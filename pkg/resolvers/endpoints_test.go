@@ -2234,34 +2234,120 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 			mockClient := mock_client.NewMockClient(ctrl)
 			resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
 
-			// Mock the pod List call for cases that get past early returns
-			needsPodList := false
-			hasNumericPolicyPort := false
-			for _, p := range tt.policyPorts {
-				if p.Port != nil && p.Port.Type == intstr.Int {
-					hasNumericPolicyPort = true
-					break
-				}
-			}
-			if hasNumericPolicyPort {
-				for _, sp := range tt.service.Spec.Ports {
-					if sp.TargetPort.Type == intstr.String {
-						needsPodList = true
-						break
-					}
-				}
-			}
-			if needsPodList {
-				mockClient.EXPECT().List(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-					func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-						list.(*corev1.PodList).Items = tt.pods
-						return nil
-					},
-				)
-			}
-
-			result := resolver.hasNamedPortBypassIssue(context.Background(), tt.service, tt.policyPorts)
+			result, err := resolver.hasNamedPortBypassIssue(tt.service, tt.policyPorts, func() ([]corev1.Pod, error) {
+				return tt.pods, nil
+			})
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestGetMatchingServiceClusterIPs_LazyPodFetch(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port80 := intstr.FromInt(80)
+
+	npPorts := []networking.NetworkPolicyPort{
+		{Protocol: &protocolTCP, Port: &port80},
+	}
+	ls := &metav1.LabelSelector{}
+
+	t.Run("no matching services skips pod list", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockClient := mock_client.NewMockClient(ctrl)
+		resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
+
+		// Only expect service list, no pod list call
+		mockClient.EXPECT().List(gomock.Any(), gomock.AssignableToTypeOf(&corev1.ServiceList{}), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+				list.(*corev1.ServiceList).Items = []corev1.Service{
+					{Spec: corev1.ServiceSpec{ClusterIP: "None"}}, // headless, will be skipped
+				}
+				return nil
+			})
+
+		result := resolver.getMatchingServiceClusterIPs(context.Background(), ls, "ns", npPorts)
+		assert.Empty(t, result)
+	})
+
+	t.Run("matching service with direct port lookup skips pod list", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockClient := mock_client.NewMockClient(ctrl)
+		resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
+
+		// Service with numeric targetPort matching NP port — LookupServiceListenPort succeeds directly
+		svc := corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "svc1", Namespace: "ns"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.0.0.1",
+				Selector:  map[string]string{"app": "web"},
+				Ports: []corev1.ServicePort{
+					{Port: 80, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(80)},
+				},
+			},
+		}
+
+		mockClient.EXPECT().List(gomock.Any(), gomock.AssignableToTypeOf(&corev1.ServiceList{}), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+				list.(*corev1.ServiceList).Items = []corev1.Service{svc}
+				return nil
+			})
+		// No pod list call expected
+
+		result := resolver.getMatchingServiceClusterIPs(context.Background(), ls, "ns", npPorts)
+		assert.Len(t, result, 1)
+		assert.Equal(t, policyinfo.NetworkAddress("10.0.0.1"), result[0].CIDR)
+	})
+
+	t.Run("pod list fetched once when needed by both functions", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockClient := mock_client.NewMockClient(ctrl)
+		resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
+
+		// Service with named targetPort + numeric NP port triggers both:
+		// - hasNamedPortBypassIssue needs pods (named targetPort + numeric policy port)
+		// - getMatchingServicePort needs pods (direct lookup fails since targetPort is named)
+		svc := corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "svc1", Namespace: "ns"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.0.0.1",
+				Selector:  map[string]string{"app": "web"},
+				Ports: []corev1.ServicePort{
+					{Port: 80, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromString("http")},
+				},
+			},
+		}
+
+		pod := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns", Labels: map[string]string{"app": "web"}},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Ports: []corev1.ContainerPort{
+						{Name: "http", ContainerPort: 80, Protocol: corev1.ProtocolTCP},
+					}},
+				},
+			},
+		}
+
+		mockClient.EXPECT().List(gomock.Any(), gomock.AssignableToTypeOf(&corev1.ServiceList{}), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+				list.(*corev1.ServiceList).Items = []corev1.Service{svc}
+				return nil
+			})
+		mockClient.EXPECT().List(gomock.Any(), gomock.AssignableToTypeOf(&corev1.PodList{}), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+				list.(*corev1.PodList).Items = []corev1.Pod{pod}
+				return nil
+			}).Times(1) // exactly once despite two consumers
+
+		result := resolver.getMatchingServiceClusterIPs(context.Background(), ls, "ns", npPorts)
+		assert.Len(t, result, 1)
+		assert.Equal(t, policyinfo.NetworkAddress("10.0.0.1"), result[0].CIDR)
+	})
 }

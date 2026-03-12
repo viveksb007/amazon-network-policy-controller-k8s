@@ -1,7 +1,8 @@
 package k8s
 
 import (
-	"github.com/pkg/errors"
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -49,7 +50,7 @@ func LookupContainerPortAndName(pod *corev1.Pod, port intstr.IntOrString, protoc
 	if port.Type == intstr.Int {
 		return port.IntVal, "", nil
 	}
-	return 0, "", errors.Errorf("unable to find port %s on pod %s", port.String(), NamespacedName(pod))
+	return 0, "", fmt.Errorf("unable to find port %s on pod %s", port.String(), NamespacedName(pod))
 }
 
 // StripDownPodTransformFunc is a transform function that strips down pod to reduce memory usage.

@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	policyinfo "github.com/aws/amazon-network-policy-controller-k8s/api/v1alpha1"
+	policyequality "github.com/aws/amazon-network-policy-controller-k8s/pkg/equality"
 	"github.com/aws/amazon-network-policy-controller-k8s/pkg/k8s"
 	"github.com/aws/amazon-network-policy-controller-k8s/pkg/resolvers"
 )
@@ -131,7 +132,7 @@ func (m *policyEndpointsManager) Reconcile(ctx context.Context, policy *networki
 		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&updateList[i]), oldRes); err != nil {
 			return err
 		}
-		if equality.Semantic.DeepEqual(oldRes.Spec, updateList[i].Spec) {
+		if policyequality.EqualPolicyEndpointSpec(oldRes.Spec, updateList[i].Spec) {
 			m.logger.V(1).Info("Policy endpoint already up to date", "id", k8s.NamespacedName(&updateList[i]))
 			continue
 		}
@@ -204,7 +205,7 @@ func (m *policyEndpointsManager) ReconcileANP(ctx context.Context, anp *policyin
 		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&updateList[i]), oldRes); err != nil {
 			return err
 		}
-		if equality.Semantic.DeepEqual(oldRes.Spec, updateList[i].Spec) {
+		if policyequality.EqualPolicyEndpointSpec(oldRes.Spec, updateList[i].Spec) {
 			m.logger.V(1).Info("ANP policy endpoint already up to date", "id", k8s.NamespacedName(&updateList[i]))
 			continue
 		}
@@ -429,6 +430,8 @@ func (m *policyEndpointsManager) getListOfEndpointInfoFromHash(hashes []string, 
 	return ruleList
 }
 
+// TODO: this can return different hash for semantically same endpointinfo as port slice order can generate separate hash.
+// Check how its tied in bin packing algo and fix if needed
 func (m *policyEndpointsManager) getEndpointInfoKey(info policyinfo.EndpointInfo) string {
 	hasher := sha256.New()
 
@@ -764,7 +767,7 @@ func (m *policyEndpointsManager) ReconcileCNP(ctx context.Context, cnp *policyin
 		if err := m.k8sClient.Get(ctx, k8s.NamespacedName(&updateList[i]), oldRes); err != nil {
 			return err
 		}
-		if equality.Semantic.DeepEqual(oldRes.Spec, updateList[i].Spec) {
+		if policyequality.EqualClusterPolicyEndpointSpec(oldRes.Spec, updateList[i].Spec) {
 			m.logger.V(1).Info("Cluster policy endpoint already up to date", "id", k8s.NamespacedName(&updateList[i]))
 			continue
 		}
