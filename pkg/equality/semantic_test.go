@@ -1,6 +1,7 @@
 package equality
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -317,4 +318,90 @@ func TestEqualPolicyEndpointSpec_DuplicateEntries(t *testing.T) {
 	}
 
 	assert.False(t, EqualPolicyEndpointSpec(a, b), "duplicate vs distinct entries should not be equal")
+}
+
+// ---------------------------------------------------------------------------
+// Field-coverage guards: these tests fail when a new field is added to a CRD
+// type but the corresponding equality/key function in semantic.go is not
+// updated. If a test below fails, update the equality function AND add the
+// new field name to the expected list here.
+// ---------------------------------------------------------------------------
+
+func structFieldNames(v interface{}) []string {
+	rt := reflect.TypeOf(v)
+	fields := make([]string, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		fields[i] = rt.Field(i).Name
+	}
+	return fields
+}
+
+func TestEqualPolicyEndpointSpec_CoversAllFields(t *testing.T) {
+	expected := []string{
+		"PodSelector",
+		"PolicyRef",
+		"PodIsolation",
+		"PodSelectorEndpoints",
+		"Ingress",
+		"Egress",
+	}
+	assert.ElementsMatch(t, expected, structFieldNames(policyinfo.PolicyEndpointSpec{}),
+		"PolicyEndpointSpec fields changed — update EqualPolicyEndpointSpec in semantic.go")
+}
+
+func TestEqualClusterPolicyEndpointSpec_CoversAllFields(t *testing.T) {
+	expected := []string{
+		"PolicyRef",
+		"Tier",
+		"Priority",
+		"Subject",
+		"PodSelectorEndpoints",
+		"Ingress",
+		"Egress",
+	}
+	assert.ElementsMatch(t, expected, structFieldNames(policyinfo.ClusterPolicyEndpointSpec{}),
+		"ClusterPolicyEndpointSpec fields changed — update EqualClusterPolicyEndpointSpec in semantic.go")
+}
+
+func TestEndpointInfoKey_CoversAllFields(t *testing.T) {
+	expected := []string{
+		"CIDR",
+		"Except",
+		"Ports",
+		"DomainName",
+	}
+	assert.ElementsMatch(t, expected, structFieldNames(policyinfo.EndpointInfo{}),
+		"EndpointInfo fields changed — update endpointInfoKey in semantic.go")
+}
+
+func TestClusterEndpointInfoKey_CoversAllFields(t *testing.T) {
+	expected := []string{
+		"CIDR",
+		"Ports",
+		"DomainName",
+		"Action",
+	}
+	assert.ElementsMatch(t, expected, structFieldNames(policyinfo.ClusterEndpointInfo{}),
+		"ClusterEndpointInfo fields changed — update clusterEndpointInfoKey in semantic.go")
+}
+
+func TestPodEndpointKey_CoversAllFields(t *testing.T) {
+	expected := []string{
+		"HostIP",
+		"PodIP",
+		"Name",
+		"Namespace",
+	}
+	assert.ElementsMatch(t, expected, structFieldNames(policyinfo.PodEndpoint{}),
+		"PodEndpoint fields changed — update podEndpointKey in semantic.go")
+}
+
+func TestPortKey_CoversAllFields(t *testing.T) {
+	expected := []string{
+		"Protocol",
+		"Port",
+		"EndPort",
+	}
+	assert.ElementsMatch(t, expected, structFieldNames(policyinfo.Port{}),
+		"Port fields changed — update portKey in semantic.go")
 }
