@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -314,18 +315,40 @@ func (m *policyEndpointsManager) processPolicyEndpoints(pes []policyinfo.PolicyE
 	return newPEs
 }
 
-// TODO: Unify combineRulesEndpoints and combineANPRulesEndpoints - both can use getEndpointInfoKey() for consistent hashing
-// the controller should consolidate the ingress and egress endpoints and put entries to one CIDR if they belong to a same CIDR
+// getCombineKey creates a combining key from CIDR and sorted exceptions
+func getCombineKey(iep policyinfo.EndpointInfo) string {
+	key := string(iep.CIDR) + "|"
+
+	// Sort exceptions for order-independence
+	sortedExcepts := make([]policyinfo.NetworkAddress, len(iep.Except))
+	copy(sortedExcepts, iep.Except)
+	sort.Slice(sortedExcepts, func(i, j int) bool {
+		return string(sortedExcepts[i]) < string(sortedExcepts[j])
+	})
+
+	for _, except := range sortedExcepts {
+		key += string(except) + "|"
+	}
+
+	return key
+}
+
 func combineRulesEndpoints(ingressEndpoints []policyinfo.EndpointInfo) []policyinfo.EndpointInfo {
 	combinedMap := make(map[string]policyinfo.EndpointInfo)
 	for _, iep := range ingressEndpoints {
-		if _, ok := combinedMap[string(iep.CIDR)]; ok {
-			tempIEP := combinedMap[string(iep.CIDR)]
-			tempIEP.Ports = append(combinedMap[string(iep.CIDR)].Ports, iep.Ports...)
-			tempIEP.Except = append(combinedMap[string(iep.CIDR)].Except, iep.Except...)
-			combinedMap[string(iep.CIDR)] = tempIEP
+		key := getCombineKey(iep)
+
+		if existing, ok := combinedMap[key]; ok {
+			// If either has all ports, result is all ports
+			if len(iep.Ports) == 0 || len(existing.Ports) == 0 {
+				existing.Ports = []policyinfo.Port{}
+			} else {
+				// Both have specific ports, append and deduplicate
+				existing.Ports = deduplicatePorts(append(existing.Ports, iep.Ports...))
+			}
+			combinedMap[key] = existing
 		} else {
-			combinedMap[string(iep.CIDR)] = iep
+			combinedMap[key] = iep
 		}
 	}
 	if len(combinedMap) > 0 {
