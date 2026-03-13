@@ -1481,437 +1481,437 @@ func TestEndpointsResolver_IncludesHostNetworkPodsInIngressEgressRules(t *testin
 	assert.True(t, egressCIDRs["10.0.0.3"], "regular database pod IP should be included in egress rules")
 }
 
-// func TestEndpointsResolver_NamedPortBypassIssue(t *testing.T) {
-// 	protocolTCP := corev1.ProtocolTCP
-// 	port80 := int32(80)
-// 	intOrStrPort80 := intstr.FromInt(int(port80))
-// 	intOrStrPort8080 := intstr.FromInt(8080)
-// 	namedPortHTTP := intstr.FromString("http")
+func TestEndpointsResolver_NamedPortBypassIssue(t *testing.T) {
+	protocolTCP := corev1.ProtocolTCP
+	port80 := int32(80)
+	intOrStrPort80 := intstr.FromInt(int(port80))
+	intOrStrPort8080 := intstr.FromInt(8080)
+	namedPortHTTP := intstr.FromString("http")
 
-// 	// Pod A: named port "http" = 80
-// 	nginxPod := corev1.Pod{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "nginx-pod",
-// 			Namespace: "test-ns",
-// 			Labels:    map[string]string{"shared-backend": "true"},
-// 		},
-// 		Spec: corev1.PodSpec{
-// 			Containers: []corev1.Container{
-// 				{
-// 					Name: "nginx",
-// 					Ports: []corev1.ContainerPort{
-// 						{
-// 							Name:          "http",
-// 							ContainerPort: 80,
-// 							Protocol:      corev1.ProtocolTCP,
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		Status: corev1.PodStatus{
-// 			PodIP: "192.168.10.156",
-// 			Phase: corev1.PodRunning,
-// 		},
-// 	}
+	// Pod A: named port "http" = 80
+	nginxPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx-pod",
+			Namespace: "test-ns",
+			Labels:    map[string]string{"shared-backend": "true"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "nginx",
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							ContainerPort: 80,
+							Protocol:      corev1.ProtocolTCP,
+						},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP: "192.168.10.156",
+			Phase: corev1.PodRunning,
+		},
+	}
 
-// 	// Pod B: named port "http" = 8080 (different container port for same named port)
-// 	pythonPod := corev1.Pod{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "python-pod",
-// 			Namespace: "test-ns",
-// 			Labels:    map[string]string{"shared-backend": "true"},
-// 		},
-// 		Spec: corev1.PodSpec{
-// 			Containers: []corev1.Container{
-// 				{
-// 					Name: "python",
-// 					Ports: []corev1.ContainerPort{
-// 						{
-// 							Name:          "http",
-// 							ContainerPort: 8080,
-// 							Protocol:      corev1.ProtocolTCP,
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		Status: corev1.PodStatus{
-// 			PodIP: "192.168.26.219",
-// 			Phase: corev1.PodRunning,
-// 		},
-// 	}
+	// Pod B: named port "http" = 8080 (different container port for same named port)
+	pythonPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "python-pod",
+			Namespace: "test-ns",
+			Labels:    map[string]string{"shared-backend": "true"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "python",
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							ContainerPort: 8080,
+							Protocol:      corev1.ProtocolTCP,
+						},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP: "192.168.26.219",
+			Phase: corev1.PodRunning,
+		},
+	}
 
-// 	// Service with named targetPort selecting both pods
-// 	problematicService := corev1.Service{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "shared-backend-svc",
-// 			Namespace: "test-ns",
-// 		},
-// 		Spec: corev1.ServiceSpec{
-// 			ClusterIP: "10.100.76.99",
-// 			Selector:  map[string]string{"shared-backend": "true"},
-// 			Ports: []corev1.ServicePort{
-// 				{
-// 					Name:       "http",
-// 					Port:       80,
-// 					TargetPort: intstr.FromString("http"), // Named targetPort
-// 					Protocol:   corev1.ProtocolTCP,
-// 				},
-// 			},
-// 		},
-// 	}
+	// Service with named targetPort selecting both pods
+	problematicService := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-backend-svc",
+			Namespace: "test-ns",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.100.76.99",
+			Selector:  map[string]string{"shared-backend": "true"},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http",
+					Port:       80,
+					TargetPort: intstr.FromString("http"), // Named targetPort
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
 
-// 	// Service with numeric targetPort (not problematic)
-// 	safeService := corev1.Service{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "safe-svc",
-// 			Namespace: "test-ns",
-// 		},
-// 		Spec: corev1.ServiceSpec{
-// 			ClusterIP: "10.100.76.100",
-// 			Selector:  map[string]string{"shared-backend": "true"},
-// 			Ports: []corev1.ServicePort{
-// 				{
-// 					Name:       "http",
-// 					Port:       80,
-// 					TargetPort: intstr.FromInt(80), // Numeric targetPort
-// 					Protocol:   corev1.ProtocolTCP,
-// 				},
-// 			},
-// 		},
-// 	}
+	// Service with numeric targetPort (not problematic)
+	safeService := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "safe-svc",
+			Namespace: "test-ns",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.100.76.100",
+			Selector:  map[string]string{"shared-backend": "true"},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http",
+					Port:       80,
+					TargetPort: intstr.FromInt(80), // Numeric targetPort
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
 
-// 	// Pods with consistent named port resolution (not problematic)
-// 	consistentPod1 := corev1.Pod{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "consistent-pod-1",
-// 			Namespace: "test-ns",
-// 			Labels:    map[string]string{"consistent-backend": "true"},
-// 		},
-// 		Spec: corev1.PodSpec{
-// 			Containers: []corev1.Container{
-// 				{
-// 					Name: "app",
-// 					Ports: []corev1.ContainerPort{
-// 						{
-// 							Name:          "http",
-// 							ContainerPort: 8080,
-// 							Protocol:      corev1.ProtocolTCP,
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		Status: corev1.PodStatus{
-// 			PodIP: "192.168.10.200",
-// 			Phase: corev1.PodRunning,
-// 		},
-// 	}
+	// Pods with consistent named port resolution (not problematic)
+	consistentPod1 := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "consistent-pod-1",
+			Namespace: "test-ns",
+			Labels:    map[string]string{"consistent-backend": "true"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "app",
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							ContainerPort: 8080,
+							Protocol:      corev1.ProtocolTCP,
+						},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP: "192.168.10.200",
+			Phase: corev1.PodRunning,
+		},
+	}
 
-// 	consistentPod2 := corev1.Pod{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "consistent-pod-2",
-// 			Namespace: "test-ns",
-// 			Labels:    map[string]string{"consistent-backend": "true"},
-// 		},
-// 		Spec: corev1.PodSpec{
-// 			Containers: []corev1.Container{
-// 				{
-// 					Name: "app",
-// 					Ports: []corev1.ContainerPort{
-// 						{
-// 							Name:          "http",
-// 							ContainerPort: 8080, // Same as consistentPod1
-// 							Protocol:      corev1.ProtocolTCP,
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		Status: corev1.PodStatus{
-// 			PodIP: "192.168.10.201",
-// 			Phase: corev1.PodRunning,
-// 		},
-// 	}
+	consistentPod2 := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "consistent-pod-2",
+			Namespace: "test-ns",
+			Labels:    map[string]string{"consistent-backend": "true"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "app",
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							ContainerPort: 8080, // Same as consistentPod1
+							Protocol:      corev1.ProtocolTCP,
+						},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP: "192.168.10.201",
+			Phase: corev1.PodRunning,
+		},
+	}
 
-// 	// Service with named targetPort that matches the policy port value
-// 	consistentServiceWithMatchingPort := corev1.Service{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      "consistent-svc-matching",
-// 			Namespace: "test-ns",
-// 		},
-// 		Spec: corev1.ServiceSpec{
-// 			ClusterIP: "10.100.76.102",
-// 			Selector:  map[string]string{"consistent-backend": "true"},
-// 			Ports: []corev1.ServicePort{
-// 				{
-// 					Name:       "http",
-// 					Port:       80,
-// 					TargetPort: intstr.FromInt(80), // Numeric targetPort that matches policy
-// 					Protocol:   corev1.ProtocolTCP,
-// 				},
-// 			},
-// 		},
-// 	}
+	// Service with named targetPort that matches the policy port value
+	consistentServiceWithMatchingPort := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "consistent-svc-matching",
+			Namespace: "test-ns",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.100.76.102",
+			Selector:  map[string]string{"consistent-backend": "true"},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http",
+					Port:       80,
+					TargetPort: intstr.FromInt(80), // Numeric targetPort that matches policy
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
 
-// 	tests := []struct {
-// 		name                     string
-// 		policy                   *networking.NetworkPolicy
-// 		pods                     []corev1.Pod
-// 		services                 []corev1.Service
-// 		expectServiceClusterIPs  []string // ClusterIPs that should be in the result
-// 		excludeServiceClusterIPs []string // ClusterIPs that should NOT be in the result
-// 	}{
-// 		{
-// 			name: "problematic: numeric policy port + named targetPort + inconsistent container ports",
-// 			policy: &networking.NetworkPolicy{
-// 				ObjectMeta: metav1.ObjectMeta{
-// 					Name:      "allow-egress-port-80-only",
-// 					Namespace: "test-ns",
-// 				},
-// 				Spec: networking.NetworkPolicySpec{
-// 					PodSelector: metav1.LabelSelector{
-// 						MatchLabels: map[string]string{"role": "client"},
-// 					},
-// 					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
-// 					Egress: []networking.NetworkPolicyEgressRule{
-// 						{
-// 							To: []networking.NetworkPolicyPeer{
-// 								{
-// 									PodSelector: &metav1.LabelSelector{
-// 										MatchLabels: map[string]string{"shared-backend": "true"},
-// 									},
-// 								},
-// 							},
-// 							Ports: []networking.NetworkPolicyPort{
-// 								{
-// 									Protocol: &protocolTCP,
-// 									Port:     &intOrStrPort80, // Numeric port
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			pods:                     []corev1.Pod{nginxPod, pythonPod},
-// 			services:                 []corev1.Service{problematicService},
-// 			expectServiceClusterIPs:  []string{}, // Should NOT include problematic service
-// 			excludeServiceClusterIPs: []string{problematicService.Spec.ClusterIP},
-// 		},
-// 		{
-// 			name: "safe: named policy port (intentional per-pod resolution)",
-// 			policy: &networking.NetworkPolicy{
-// 				ObjectMeta: metav1.ObjectMeta{
-// 					Name:      "allow-egress-named-port",
-// 					Namespace: "test-ns",
-// 				},
-// 				Spec: networking.NetworkPolicySpec{
-// 					PodSelector: metav1.LabelSelector{
-// 						MatchLabels: map[string]string{"role": "client"},
-// 					},
-// 					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
-// 					Egress: []networking.NetworkPolicyEgressRule{
-// 						{
-// 							To: []networking.NetworkPolicyPeer{
-// 								{
-// 									PodSelector: &metav1.LabelSelector{
-// 										MatchLabels: map[string]string{"shared-backend": "true"},
-// 									},
-// 								},
-// 							},
-// 							Ports: []networking.NetworkPolicyPort{
-// 								{
-// 									Protocol: &protocolTCP,
-// 									Port:     &namedPortHTTP, // Named port in policy - intentional
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			pods:                    []corev1.Pod{nginxPod, pythonPod},
-// 			services:                []corev1.Service{problematicService},
-// 			expectServiceClusterIPs: []string{problematicService.Spec.ClusterIP}, // Should include - named port is intentional
-// 		},
-// 		{
-// 			name: "safe: numeric targetPort in service",
-// 			policy: &networking.NetworkPolicy{
-// 				ObjectMeta: metav1.ObjectMeta{
-// 					Name:      "allow-egress-port-80",
-// 					Namespace: "test-ns",
-// 				},
-// 				Spec: networking.NetworkPolicySpec{
-// 					PodSelector: metav1.LabelSelector{
-// 						MatchLabels: map[string]string{"role": "client"},
-// 					},
-// 					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
-// 					Egress: []networking.NetworkPolicyEgressRule{
-// 						{
-// 							To: []networking.NetworkPolicyPeer{
-// 								{
-// 									PodSelector: &metav1.LabelSelector{
-// 										MatchLabels: map[string]string{"shared-backend": "true"},
-// 									},
-// 								},
-// 							},
-// 							Ports: []networking.NetworkPolicyPort{
-// 								{
-// 									Protocol: &protocolTCP,
-// 									Port:     &intOrStrPort80,
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			pods:                    []corev1.Pod{nginxPod, pythonPod},
-// 			services:                []corev1.Service{safeService},
-// 			expectServiceClusterIPs: []string{safeService.Spec.ClusterIP}, // Should include - numeric targetPort is safe
-// 		},
-// 		{
-// 			name: "safe: consistent named port resolution across pods",
-// 			policy: &networking.NetworkPolicy{
-// 				ObjectMeta: metav1.ObjectMeta{
-// 					Name:      "allow-egress-port-80",
-// 					Namespace: "test-ns",
-// 				},
-// 				Spec: networking.NetworkPolicySpec{
-// 					PodSelector: metav1.LabelSelector{
-// 						MatchLabels: map[string]string{"role": "client"},
-// 					},
-// 					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
-// 					Egress: []networking.NetworkPolicyEgressRule{
-// 						{
-// 							To: []networking.NetworkPolicyPeer{
-// 								{
-// 									PodSelector: &metav1.LabelSelector{
-// 										MatchLabels: map[string]string{"consistent-backend": "true"},
-// 									},
-// 								},
-// 							},
-// 							Ports: []networking.NetworkPolicyPort{
-// 								{
-// 									Protocol: &protocolTCP,
-// 									Port:     &intOrStrPort80,
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			pods:                    []corev1.Pod{consistentPod1, consistentPod2},
-// 			services:                []corev1.Service{consistentServiceWithMatchingPort},
-// 			expectServiceClusterIPs: []string{consistentServiceWithMatchingPort.Spec.ClusterIP}, // Should include - consistent resolution
-// 		},
-// 		{
-// 			name: "safe: policy allows all ports that service remaps to",
-// 			policy: &networking.NetworkPolicy{
-// 				ObjectMeta: metav1.ObjectMeta{
-// 					Name:      "allow-egress-all-remapped-ports",
-// 					Namespace: "test-ns",
-// 				},
-// 				Spec: networking.NetworkPolicySpec{
-// 					PodSelector: metav1.LabelSelector{
-// 						MatchLabels: map[string]string{"role": "client"},
-// 					},
-// 					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
-// 					Egress: []networking.NetworkPolicyEgressRule{
-// 						{
-// 							To: []networking.NetworkPolicyPeer{
-// 								{
-// 									PodSelector: &metav1.LabelSelector{
-// 										MatchLabels: map[string]string{"shared-backend": "true"},
-// 									},
-// 								},
-// 							},
-// 							Ports: []networking.NetworkPolicyPort{
-// 								{
-// 									Protocol: &protocolTCP,
-// 									Port:     &intOrStrPort80, // Allows port 80 (nginxPod)
-// 								},
-// 								{
-// 									Protocol: &protocolTCP,
-// 									Port:     &intOrStrPort8080, // Allows port 8080 (pythonPod)
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			pods:                    []corev1.Pod{nginxPod, pythonPod},
-// 			services:                []corev1.Service{problematicService},
-// 			expectServiceClusterIPs: []string{problematicService.Spec.ClusterIP}, // Should include - all remapped ports are allowed
-// 		},
-// 	}
+	tests := []struct {
+		name                     string
+		policy                   *networking.NetworkPolicy
+		pods                     []corev1.Pod
+		services                 []corev1.Service
+		expectServiceClusterIPs  []string // ClusterIPs that should be in the result
+		excludeServiceClusterIPs []string // ClusterIPs that should NOT be in the result
+	}{
+		{
+			name: "problematic: numeric policy port + named targetPort + inconsistent container ports",
+			policy: &networking.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "allow-egress-port-80-only",
+					Namespace: "test-ns",
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"role": "client"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
+					Egress: []networking.NetworkPolicyEgressRule{
+						{
+							To: []networking.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"shared-backend": "true"},
+									},
+								},
+							},
+							Ports: []networking.NetworkPolicyPort{
+								{
+									Protocol: &protocolTCP,
+									Port:     &intOrStrPort80, // Numeric port
+								},
+							},
+						},
+					},
+				},
+			},
+			pods:                     []corev1.Pod{nginxPod, pythonPod},
+			services:                 []corev1.Service{problematicService},
+			expectServiceClusterIPs:  []string{}, // Should NOT include problematic service
+			excludeServiceClusterIPs: []string{problematicService.Spec.ClusterIP},
+		},
+		{
+			name: "safe: named policy port (intentional per-pod resolution)",
+			policy: &networking.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "allow-egress-named-port",
+					Namespace: "test-ns",
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"role": "client"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
+					Egress: []networking.NetworkPolicyEgressRule{
+						{
+							To: []networking.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"shared-backend": "true"},
+									},
+								},
+							},
+							Ports: []networking.NetworkPolicyPort{
+								{
+									Protocol: &protocolTCP,
+									Port:     &namedPortHTTP, // Named port in policy - intentional
+								},
+							},
+						},
+					},
+				},
+			},
+			pods:                    []corev1.Pod{nginxPod, pythonPod},
+			services:                []corev1.Service{problematicService},
+			expectServiceClusterIPs: []string{problematicService.Spec.ClusterIP}, // Should include - named port is intentional
+		},
+		{
+			name: "safe: numeric targetPort in service",
+			policy: &networking.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "allow-egress-port-80",
+					Namespace: "test-ns",
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"role": "client"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
+					Egress: []networking.NetworkPolicyEgressRule{
+						{
+							To: []networking.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"shared-backend": "true"},
+									},
+								},
+							},
+							Ports: []networking.NetworkPolicyPort{
+								{
+									Protocol: &protocolTCP,
+									Port:     &intOrStrPort80,
+								},
+							},
+						},
+					},
+				},
+			},
+			pods:                    []corev1.Pod{nginxPod, pythonPod},
+			services:                []corev1.Service{safeService},
+			expectServiceClusterIPs: []string{safeService.Spec.ClusterIP}, // Should include - numeric targetPort is safe
+		},
+		{
+			name: "safe: consistent named port resolution across pods",
+			policy: &networking.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "allow-egress-port-80",
+					Namespace: "test-ns",
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"role": "client"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
+					Egress: []networking.NetworkPolicyEgressRule{
+						{
+							To: []networking.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"consistent-backend": "true"},
+									},
+								},
+							},
+							Ports: []networking.NetworkPolicyPort{
+								{
+									Protocol: &protocolTCP,
+									Port:     &intOrStrPort80,
+								},
+							},
+						},
+					},
+				},
+			},
+			pods:                    []corev1.Pod{consistentPod1, consistentPod2},
+			services:                []corev1.Service{consistentServiceWithMatchingPort},
+			expectServiceClusterIPs: []string{consistentServiceWithMatchingPort.Spec.ClusterIP}, // Should include - consistent resolution
+		},
+		{
+			name: "safe: policy allows all ports that service remaps to",
+			policy: &networking.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "allow-egress-all-remapped-ports",
+					Namespace: "test-ns",
+				},
+				Spec: networking.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"role": "client"},
+					},
+					PolicyTypes: []networking.PolicyType{networking.PolicyTypeEgress},
+					Egress: []networking.NetworkPolicyEgressRule{
+						{
+							To: []networking.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"shared-backend": "true"},
+									},
+								},
+							},
+							Ports: []networking.NetworkPolicyPort{
+								{
+									Protocol: &protocolTCP,
+									Port:     &intOrStrPort80, // Allows port 80 (nginxPod)
+								},
+								{
+									Protocol: &protocolTCP,
+									Port:     &intOrStrPort8080, // Allows port 8080 (pythonPod)
+								},
+							},
+						},
+					},
+				},
+			},
+			pods:                    []corev1.Pod{nginxPod, pythonPod},
+			services:                []corev1.Service{problematicService},
+			expectServiceClusterIPs: []string{problematicService.Spec.ClusterIP}, // Should include - all remapped ports are allowed
+		},
+	}
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			ctrl := gomock.NewController(t)
-// 			defer ctrl.Finish()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-// 			mockClient := mock_client.NewMockClient(ctrl)
-// 			resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
+			mockClient := mock_client.NewMockClient(ctrl)
+			resolver := NewEndpointsResolver(mockClient, logr.New(&log.NullLogSink{}))
 
-// 			// Setup mock expectations
-// 			podList := &corev1.PodList{}
-// 			serviceList := &corev1.ServiceList{}
+			// Setup mock expectations
+			podList := &corev1.PodList{}
+			serviceList := &corev1.ServiceList{}
 
-// 			// Mock pod list calls (may be called multiple times)
-// 			mockClient.EXPECT().List(gomock.Any(), podList, gomock.Any()).DoAndReturn(
-// 				func(ctx context.Context, list *corev1.PodList, opts ...client.ListOption) error {
-// 					list.Items = tt.pods
-// 					return nil
-// 				},
-// 			).AnyTimes()
+			// Mock pod list calls (may be called multiple times)
+			mockClient.EXPECT().List(gomock.Any(), podList, gomock.Any()).DoAndReturn(
+				func(ctx context.Context, list *corev1.PodList, opts ...client.ListOption) error {
+					list.Items = tt.pods
+					return nil
+				},
+			).AnyTimes()
 
-// 			// Mock service list calls
-// 			mockClient.EXPECT().List(gomock.Any(), serviceList, gomock.Any()).DoAndReturn(
-// 				func(ctx context.Context, list *corev1.ServiceList, opts ...client.ListOption) error {
-// 					list.Items = tt.services
-// 					return nil
-// 				},
-// 			).AnyTimes()
+			// Mock service list calls
+			mockClient.EXPECT().List(gomock.Any(), serviceList, gomock.Any()).DoAndReturn(
+				func(ctx context.Context, list *corev1.ServiceList, opts ...client.ListOption) error {
+					list.Items = tt.services
+					return nil
+				},
+			).AnyTimes()
 
-// 			_, egressEndpoints, _, err := resolver.Resolve(context.Background(), tt.policy)
-// 			require.NoError(t, err)
+			_, egressEndpoints, _, err := resolver.Resolve(context.Background(), tt.policy)
+			require.NoError(t, err)
 
-// 			// Extract ClusterIPs from egress endpoints
-// 			var foundClusterIPs []string
-// 			for _, ep := range egressEndpoints {
-// 				for _, svc := range tt.services {
-// 					if string(ep.CIDR) == svc.Spec.ClusterIP {
-// 						foundClusterIPs = append(foundClusterIPs, string(ep.CIDR))
-// 					}
-// 				}
-// 			}
+			// Extract ClusterIPs from egress endpoints
+			var foundClusterIPs []string
+			for _, ep := range egressEndpoints {
+				for _, svc := range tt.services {
+					if string(ep.CIDR) == svc.Spec.ClusterIP {
+						foundClusterIPs = append(foundClusterIPs, string(ep.CIDR))
+					}
+				}
+			}
 
-// 			// Check expected ClusterIPs are present
-// 			for _, expectedIP := range tt.expectServiceClusterIPs {
-// 				found := false
-// 				for _, ip := range foundClusterIPs {
-// 					if ip == expectedIP {
-// 						found = true
-// 						break
-// 					}
-// 				}
-// 				assert.True(t, found, "Expected ClusterIP %s to be in egress endpoints", expectedIP)
-// 			}
+			// Check expected ClusterIPs are present
+			for _, expectedIP := range tt.expectServiceClusterIPs {
+				found := false
+				for _, ip := range foundClusterIPs {
+					if ip == expectedIP {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "Expected ClusterIP %s to be in egress endpoints", expectedIP)
+			}
 
-// 			// Check excluded ClusterIPs are NOT present
-// 			for _, excludedIP := range tt.excludeServiceClusterIPs {
-// 				found := false
-// 				for _, ip := range foundClusterIPs {
-// 					if ip == excludedIP {
-// 						found = true
-// 						break
-// 					}
-// 				}
-// 				assert.False(t, found, "ClusterIP %s should NOT be in egress endpoints (problematic)", excludedIP)
-// 			}
-// 		})
-// 	}
-// }
+			// Check excluded ClusterIPs are NOT present
+			for _, excludedIP := range tt.excludeServiceClusterIPs {
+				found := false
+				for _, ip := range foundClusterIPs {
+					if ip == excludedIP {
+						found = true
+						break
+					}
+				}
+				assert.False(t, found, "ClusterIP %s should NOT be in egress endpoints (problematic)", excludedIP)
+			}
+		})
+	}
+}
 
 func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 	protocolTCP := corev1.ProtocolTCP
@@ -1919,6 +1919,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 	port80 := int32(80)
 	intOrStrPort80 := intstr.FromInt(int(port80))
 	intOrStrPort8080 := intstr.FromInt(8080)
+	intOrStrPort6379 := intstr.FromInt(6379)
 	namedPortHTTP := intstr.FromString("http")
 
 	tests := []struct {
@@ -1936,7 +1937,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+						{Port: 80, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -1973,7 +1974,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+						{Port: 80, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -2038,7 +2039,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+						{Port: 80, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -2075,7 +2076,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+						{Port: 80, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -2112,7 +2113,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+						{Port: 80, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -2138,7 +2139,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+						{Port: 80, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -2169,14 +2170,14 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 			expected: false, // All container ports are allowed by policy
 		},
 		{
-			name: "problematic: protocol mismatch - policy allows TCP but container port is UDP",
+			name: "problematic: protocol mismatch - NP allows TCP/80 but named targetPort resolves to UDP/80",
 			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
 				Spec: corev1.ServiceSpec{
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("dns"), Protocol: corev1.ProtocolUDP},
+						{Port: 80, TargetPort: intstr.FromString("dns"), Protocol: corev1.ProtocolTCP},
 					},
 				},
 			},
@@ -2194,7 +2195,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					Status: corev1.PodStatus{PodIP: "1.0.0.1", Phase: corev1.PodRunning},
 				},
 			},
-			expected: true, // Policy allows TCP/80 but container port is UDP/80
+			expected: true, // NP matches svc port TCP/80, named targetPort "dns" resolves to UDP/80 which != TCP/80
 		},
 		{
 			name: "safe: protocol matches - policy allows UDP and container port is UDP",
@@ -2204,7 +2205,7 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 					ClusterIP: "10.0.0.1",
 					Selector:  map[string]string{"app": "test"},
 					Ports: []corev1.ServicePort{
-						{TargetPort: intstr.FromString("dns"), Protocol: corev1.ProtocolUDP},
+						{Port: 80, TargetPort: intstr.FromString("dns"), Protocol: corev1.ProtocolUDP},
 					},
 				},
 			},
@@ -2223,6 +2224,75 @@ func TestEndpointsResolver_hasNamedPortBypassIssue(t *testing.T) {
 				},
 			},
 			expected: false, // Policy allows UDP/80 and container port is UDP/80
+		},
+		{
+			name: "safe: multi-port service with NP matching only one port",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
+				Spec: corev1.ServiceSpec{
+					ClusterIP: "10.0.0.1",
+					Selector:  map[string]string{"app": "test"},
+					Ports: []corev1.ServicePort{
+						{Name: "svc-port", Port: 6379, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromString("app-port")},
+						{Name: "metrics", Port: 9101, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromString("metrics-port")},
+					},
+				},
+			},
+			policyPorts: []networking.NetworkPolicyPort{
+				{Protocol: &protocolTCP, Port: &intOrStrPort6379},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns", Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Ports: []corev1.ContainerPort{
+									{Name: "probe", ContainerPort: 8888, Protocol: corev1.ProtocolTCP},
+									{Name: "app-port", ContainerPort: 6379, Protocol: corev1.ProtocolTCP},
+									{Name: "metrics-port", ContainerPort: 9101, Protocol: corev1.ProtocolTCP},
+								},
+							},
+						},
+					},
+					Status: corev1.PodStatus{PodIP: "1.0.0.1", Phase: corev1.PodRunning},
+				},
+			},
+			expected: false, // NP only matches svc port 6379, named targetPort "app-port" resolves to 6379 which is allowed. metrics-port (9101) is never checked.
+		},
+		{
+			name: "problematic: nil protocol in NP defaults to TCP and detects bypass",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns"},
+				Spec: corev1.ServiceSpec{
+					ClusterIP: "10.0.0.1",
+					Selector:  map[string]string{"app": "test"},
+					Ports: []corev1.ServicePort{
+						// Service port 80, named targetPort "http", protocol omitted (defaults to TCP)
+						{Name: "http", Port: 80, TargetPort: intstr.FromString("http")},
+					},
+				},
+			},
+			policyPorts: []networking.NetworkPolicyPort{
+				// NP allows port 80 with nil Protocol (defaults to TCP)
+				{Port: &intOrStrPort80},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns", Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Ports: []corev1.ContainerPort{
+									{Name: "http", ContainerPort: 8080},
+								},
+							},
+						},
+					},
+					Status: corev1.PodStatus{PodIP: "1.0.0.1", Phase: corev1.PodRunning},
+				},
+			},
+			expected: true, // Without nil-to-TCP defaulting this would incorrectly return false (safe)
 		},
 	}
 

@@ -463,19 +463,18 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 			continue
 		}
 
-		// TODO: enable this by-pass check after fixing the bypass check logic
 		// Check for issue: named service targetPort + pod container ports not allowed by policy
-		// bypass, err := r.hasNamedPortBypassIssue(svc, npPorts, getAllPods)
-		// if err != nil {
-		// 	r.logger.Info("Unable to list pods", "err", err)
-		// 	return nil
-		// }
-		// if bypass {
-		// 	r.logger.Info("skipping service due to named port bypass issue",
-		// 		"serviceName", svc.Name, "serviceNamespace", svc.Namespace,
-		// 		"reason", "service uses named targetPort with pods resolving to container ports not allowed by policy")
-		// 	continue
-		// }
+		bypass, err := r.hasNamedPortBypassIssue(svc, npPorts, getAllPods)
+		if err != nil {
+			r.logger.Info("Unable to list pods", "err", err)
+			return nil
+		}
+		if bypass {
+			r.logger.Info("skipping service due to named port bypass issue",
+				"serviceName", svc.Name, "serviceNamespace", svc.Namespace,
+				"reason", "service uses named targetPort with pods resolving to container ports not allowed by policy")
+			continue
+		}
 
 		var portList []policyinfo.Port
 		for _, npPort := range npPorts {
@@ -514,10 +513,21 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 	return networkPeers
 }
 
-// hasNamedPortBypassIssue checks if adding a Service ClusterIP would create a bypass.
-// The issue occurs when:
-// 1. The Service uses a NAMED targetPort (e.g., targetPort: http)
-// 2. Any pod behind the Service resolves that named port to a container port not allowed by NetworkPolicy ports
+// hasNamedPortBypassIssue checks if adding a Service ClusterIP to the PolicyEndpoint
+// would create a security bypass for the given NetworkPolicy ports.
+//
+// The bypass occurs when:
+//  1. A NetworkPolicy specifies a numeric port (e.g. port 80/TCP) that matches a
+//     Service's listen port (svc.spec.ports[].port), but that Service port's targetPort
+//     is a named port (svc.spec.ports[].targetPort is a string like "http").
+//  2. A pod selected by the Service's selector (svc.spec.selector) resolves that named
+//     targetPort to a container port (container.ports[].containerPort) that differs from
+//     the numeric port the NetworkPolicy intended to allow.
+//
+// For example, if a NetworkPolicy allows port 80/TCP and a Service listens on port 80
+// with targetPort "http", but a pod's container maps "http" to container port 8080,
+// then adding the Service ClusterIP would inadvertently allow traffic to port 8080,
+// which the policy did not intend to permit.
 func (r *defaultEndpointsResolver) hasNamedPortBypassIssue(svc *corev1.Service,
 	policyPorts []networking.NetworkPolicyPort, getAllPods func() ([]corev1.Pod, error)) (bool, error) {
 	// Collect numeric port+protocol pairs allowed by the policy
@@ -527,8 +537,12 @@ func (r *defaultEndpointsResolver) hasNamedPortBypassIssue(svc *corev1.Service,
 	}
 	allowedPorts := make(map[portProto]bool)
 	for _, port := range policyPorts {
-		if port.Port != nil && port.Port.Type == intstr.Int && port.Protocol != nil {
-			allowedPorts[portProto{port: port.Port.IntVal, protocol: *port.Protocol}] = true
+		if port.Port != nil && port.Port.Type == intstr.Int {
+			proto := corev1.ProtocolTCP
+			if port.Protocol != nil {
+				proto = *port.Protocol
+			}
+			allowedPorts[portProto{port: port.Port.IntVal, protocol: proto}] = true
 		}
 	}
 	// No numeric policy ports means named ports in policy (intentional per-pod resolution) or all ports allowed
@@ -536,14 +550,31 @@ func (r *defaultEndpointsResolver) hasNamedPortBypassIssue(svc *corev1.Service,
 		return false, nil
 	}
 
-	// Check if service has any named targetPort and collect them
-	namedTargetPorts := make(map[string]bool)
-	for _, svcPort := range svc.Spec.Ports {
-		if svcPort.TargetPort.Type == intstr.String {
-			namedTargetPorts[svcPort.TargetPort.StrVal] = true
+	// Only collect named targetPorts from service ports that the NP actually matches.
+	// A NP numeric port matches a service port when the NP port value equals the service
+	// listen port (svcPort.Port) and the protocol matches. If that matched service port
+	// uses a named targetPort, it needs bypass checking.
+	svcNamedTargetPortsAllowedByNP := make(map[string]bool)
+	for _, npPort := range policyPorts {
+		if npPort.Port == nil || npPort.Port.Type != intstr.Int {
+			continue
+		}
+		npProto := corev1.ProtocolTCP
+		if npPort.Protocol != nil {
+			npProto = *npPort.Protocol
+		}
+		for _, svcPort := range svc.Spec.Ports {
+			svcProto := svcPort.Protocol
+			if svcProto == "" {
+				svcProto = corev1.ProtocolTCP
+			}
+			if svcPort.Port == npPort.Port.IntVal && svcProto == npProto &&
+				svcPort.TargetPort.Type == intstr.String {
+				svcNamedTargetPortsAllowedByNP[svcPort.TargetPort.StrVal] = true
+			}
 		}
 	}
-	if len(namedTargetPorts) == 0 {
+	if len(svcNamedTargetPortsAllowedByNP) == 0 {
 		return false, nil
 	}
 
@@ -555,7 +586,8 @@ func (r *defaultEndpointsResolver) hasNamedPortBypassIssue(svc *corev1.Service,
 	// Filter pods in-memory using service selector
 	svcSelector := labels.Set(svc.Spec.Selector).AsSelector()
 
-	// Single pass over all pods: check if any named targetPort resolves to a container port not allowed by policy
+	// Single pass over all pods: check if any svcNamedTargetPortsAllowedByNP resolves to a
+	// container port not allowed by policy
 	for i := range allPods {
 		pod := &allPods[i]
 		if !svcSelector.Matches(labels.Set(pod.Labels)) {
@@ -565,14 +597,17 @@ func (r *defaultEndpointsResolver) hasNamedPortBypassIssue(svc *corev1.Service,
 			container := &pod.Spec.Containers[j]
 			for k := range container.Ports {
 				cp := &container.Ports[k]
-				if namedTargetPorts[cp.Name] {
+				if svcNamedTargetPortsAllowedByNP[cp.Name] {
 					proto := cp.Protocol
 					if proto == "" {
 						proto = corev1.ProtocolTCP
 					}
 					if !allowedPorts[portProto{port: cp.ContainerPort, protocol: proto}] {
-						r.logger.V(1).Info("Named port resolves to disallowed container port",
-							"service", k8s.NamespacedName(svc), "portName", cp.Name,
+						r.logger.Info("Named port resolves to disallowed container port",
+							"service", k8s.NamespacedName(svc),
+							"pod", k8s.NamespacedName(pod),
+							"container", container.Name,
+							"portName", cp.Name,
 							"containerPort", cp.ContainerPort, "protocol", proto)
 						return true, nil
 					}
