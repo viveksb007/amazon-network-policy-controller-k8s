@@ -463,18 +463,19 @@ func (r *defaultEndpointsResolver) getMatchingServiceClusterIPs(ctx context.Cont
 			continue
 		}
 
+		// TODO: enable this by-pass check after fixing the bypass check logic
 		// Check for issue: named service targetPort + pod container ports not allowed by policy
-		bypass, err := r.hasNamedPortBypassIssue(svc, npPorts, getAllPods)
-		if err != nil {
-			r.logger.Info("Unable to list pods", "err", err)
-			return nil
-		}
-		if bypass {
-			r.logger.Info("skipping service due to named port bypass issue",
-				"serviceName", svc.Name, "serviceNamespace", svc.Namespace,
-				"reason", "service uses named targetPort with pods resolving to container ports not allowed by policy")
-			continue
-		}
+		// bypass, err := r.hasNamedPortBypassIssue(svc, npPorts, getAllPods)
+		// if err != nil {
+		// 	r.logger.Info("Unable to list pods", "err", err)
+		// 	return nil
+		// }
+		// if bypass {
+		// 	r.logger.Info("skipping service due to named port bypass issue",
+		// 		"serviceName", svc.Name, "serviceNamespace", svc.Namespace,
+		// 		"reason", "service uses named targetPort with pods resolving to container ports not allowed by policy")
+		// 	continue
+		// }
 
 		var portList []policyinfo.Port
 		for _, npPort := range npPorts {
