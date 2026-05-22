@@ -997,11 +997,7 @@ func Test_processANPPolicyEndpoints(t *testing.T) {
 	})
 }
 
-func Test_combineANPRulesEndpoints(t *testing.T) {
-	m := &policyEndpointsManager{
-		logger: zap.New(),
-	}
-
+func Test_combineRulesEndpoints(t *testing.T) {
 	port80 := int32(80)
 	port443 := int32(443)
 	port8080 := int32(8080)
@@ -1020,7 +1016,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 1, len(result), "Same FQDN with different ports should combine into one entry")
 		assert.Equal(t, policyinfo.DomainName("example.com"), result[0].DomainName)
@@ -1043,7 +1039,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 1, len(result), "Same CIDR with different ports should combine into one entry")
 		assert.Equal(t, policyinfo.NetworkAddress("10.0.0.0/8"), result[0].CIDR)
@@ -1062,7 +1058,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 1, len(result), "Same FQDN should combine")
 		assert.Equal(t, 0, len(result[0].Ports), "All-ports (empty) should take precedence")
@@ -1082,7 +1078,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 1, len(result), "Same CIDR+exceptions with different ports should combine")
 		assert.Equal(t, 2, len(result[0].Ports))
@@ -1100,7 +1096,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 2, len(result), "Different CIDRs should remain separate")
 	})
@@ -1117,7 +1113,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 2, len(result), "Different FQDNs should remain separate")
 	})
@@ -1136,7 +1132,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 2, len(result), "Same CIDR with different exceptions should remain separate")
 	})
@@ -1153,7 +1149,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 1, len(result))
 		assert.Equal(t, 1, len(result[0].Ports), "Duplicate ports should be deduplicated")
@@ -1173,7 +1169,7 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 1, len(result), "Same exceptions in different order should combine")
 		assert.Equal(t, 2, len(result[0].Ports))
@@ -1191,14 +1187,12 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		result := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
 		assert.Equal(t, 2, len(result), "FQDN and CIDR entries should not combine even if string matches")
 	})
 
-	t.Run("parity with NP combineRulesEndpoints for CIDR case", func(t *testing.T) {
-		// This test verifies ANP combining produces the same result as NP combining
-		// for CIDR-based endpoints (the common case)
+	t.Run("CIDR entries with multiple ports and protocols combine correctly", func(t *testing.T) {
 		endpoints := []policyinfo.EndpointInfo{
 			{
 				CIDR:  "10.0.0.0/8",
@@ -1214,14 +1208,11 @@ func Test_combineANPRulesEndpoints(t *testing.T) {
 			},
 		}
 
-		npResult := combineRulesEndpoints(endpoints)
-		anpResult := m.combineANPRulesEndpoints(endpoints)
+		result := combineRulesEndpoints(endpoints)
 
-		assert.Equal(t, len(npResult), len(anpResult),
-			"ANP and NP combining should produce same number of entries for CIDR endpoints")
-		assert.Equal(t, 1, len(anpResult))
-		assert.Equal(t, 3, len(anpResult[0].Ports),
-			"ANP should combine ports the same way NP does")
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, 3, len(result[0].Ports),
+			"All ports across protocols should be combined")
 	})
 }
 
