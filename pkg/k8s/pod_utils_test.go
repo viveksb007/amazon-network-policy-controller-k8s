@@ -327,10 +327,10 @@ func TestStripDownPodObject_AnnotationPrune(t *testing.T) {
 		{
 			name: "drops foreign annotations, keeps pod-ips",
 			annotations: map[string]string{
-				podIPAnnotation:                    "10.0.0.5",
-				"sidecar.istio.io/inject":          "true",
+				podIPAnnotation:           "10.0.0.5",
+				"sidecar.istio.io/inject": "true",
 				"kubectl.kubernetes.io/last-applied-configuration": "{}",
-				"some.controller/state":            "deeply-bloated-data-xxxxxxxx",
+				"some.controller/state":                            "deeply-bloated-data-xxxxxxxx",
 			},
 			wantAnnotations:  map[string]string{podIPAnnotation: "10.0.0.5"},
 			wantGetPodIPFrom: "annotation",
