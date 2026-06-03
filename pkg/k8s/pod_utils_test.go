@@ -319,10 +319,10 @@ func TestStripDownPodObject(t *testing.T) {
 
 func TestStripDownPodObject_AnnotationPrune(t *testing.T) {
 	tests := []struct {
-		name             string
-		annotations      map[string]string
-		wantAnnotations  map[string]string
-		wantGetPodIPFrom string // expected IP source after strip: "status" or "annotation" or ""
+		name            string
+		annotations     map[string]string
+		wantAnnotations map[string]string
+		wantPodIP       string
 	}{
 		{
 			name: "drops foreign annotations, keeps pod-ips",
@@ -332,14 +332,14 @@ func TestStripDownPodObject_AnnotationPrune(t *testing.T) {
 				"kubectl.kubernetes.io/last-applied-configuration": "{}",
 				"some.controller/state":                            "deeply-bloated-data-xxxxxxxx",
 			},
-			wantAnnotations:  map[string]string{podIPAnnotation: "10.0.0.5"},
-			wantGetPodIPFrom: "annotation",
+			wantAnnotations: map[string]string{podIPAnnotation: "10.0.0.5"},
+			wantPodIP:       "10.0.0.5",
 		},
 		{
-			name:             "no annotations -> nil map",
-			annotations:      nil,
-			wantAnnotations:  nil,
-			wantGetPodIPFrom: "",
+			name:            "no annotations -> nil map",
+			annotations:     nil,
+			wantAnnotations: nil,
+			wantPodIP:       "",
 		},
 		{
 			name: "only foreign annotations -> nil map",
@@ -347,16 +347,16 @@ func TestStripDownPodObject_AnnotationPrune(t *testing.T) {
 				"foo/bar":   "baz",
 				"unrelated": "data",
 			},
-			wantAnnotations:  nil,
-			wantGetPodIPFrom: "",
+			wantAnnotations: nil,
+			wantPodIP:       "",
 		},
 		{
 			name: "pod-ips with empty value still preserved (apiserver may emit empty)",
 			annotations: map[string]string{
 				podIPAnnotation: "",
 			},
-			wantAnnotations:  map[string]string{podIPAnnotation: ""},
-			wantGetPodIPFrom: "",
+			wantAnnotations: map[string]string{podIPAnnotation: ""},
+			wantPodIP:       "",
 		},
 	}
 
@@ -378,12 +378,7 @@ func TestStripDownPodObject_AnnotationPrune(t *testing.T) {
 			assert.Equal(t, map[string]string{"app": "test"}, stripped.Labels, "labels must be preserved")
 
 			// IP fallback through GetPodIP must still resolve when only annotation is set.
-			switch tt.wantGetPodIPFrom {
-			case "annotation":
-				assert.Equal(t, "10.0.0.5", GetPodIP(stripped))
-			case "":
-				assert.Equal(t, "", GetPodIP(stripped))
-			}
+			assert.Equal(t, tt.wantPodIP, GetPodIP(stripped))
 		})
 	}
 }
